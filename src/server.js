@@ -18,7 +18,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: '*' },
+  cors: { origin: ["https://3des-chatapp.vercel.app/", "http://localhost:3000"], },
 });
 
 const { db, users, messages } = await connectToDatabase();

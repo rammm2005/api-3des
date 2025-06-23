@@ -149,7 +149,6 @@ export default function (db) {
     router.get('/chat/all', requireAuth, async (_req, res) => {
         try {
             const textMessages = await db.collection('messages').find({}).toArray();
-            const imageMessages = await db.collection('images').find({}).toArray();
 
             const mappedText = textMessages.map((msg) => ({
                 sender: msg.sender,
@@ -158,24 +157,15 @@ export default function (db) {
                 type: 'text',
             }));
 
-            const mappedImages = imageMessages.map((img) => ({
-                sender: img.sender,
-                message: img.image.toString('base64'),
-                timestamp: img.timestamp,
-                mime: img.mime,
-                type: 'image',
-            }));
+            mappedText.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
-            const allMessages = [...mappedText, ...mappedImages];
-
-            allMessages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-
-            res.json(allMessages);
+            res.json(mappedText);
         } catch (err) {
-            console.error('❌ Failed to fetch all chat messages:', err);
+            console.error('❌ Failed to fetch chat messages:', err);
             res.status(500).json({ success: false, message: 'Failed to load messages' });
         }
     });
+
 
 
 

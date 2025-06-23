@@ -12,7 +12,6 @@ import { encrypt3DES } from './lib/crypto.js'
 
 const app = express()
 
-// ✅ FIX: NO SLASH
 app.use(cors({
   origin: ["https://3des-chatapp.vercel.app", "http://localhost:3000"],
   credentials: true

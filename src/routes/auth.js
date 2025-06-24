@@ -3,6 +3,7 @@ import nodemailer from 'nodemailer';
 import { generateOTP, encrypt3DES, decrypt3DES, encryptImage, decryptImage } from '../lib/crypto.js';
 import { requireAuth } from '../middleware/auth.js';
 import { fileTypeFromBuffer } from 'file-type'
+import { performance } from 'perf_hooks';
 
 const transporter = nodemailer.createTransport({
     service: 'gmail',
@@ -63,54 +64,62 @@ export default function (db) {
         const { message } = req.body;
         const sender = req.user.email;
 
-        if (!message)
+        if (!message) {
             return res.status(400).json({ success: false, message: 'Missing message' });
+        }
 
+        const start = performance.now();
         const encrypted = encrypt3DES(message);
-        await messages.insertOne({ sender, message: encrypted, timestamp: new Date() });
+        const duration = performance.now() - start;
 
-        const io = req.app.get('io');
-        io.emit('newMessage');
+        try {
+            await messages.insertOne({
+                sender,
+                message: encrypted,
+                encryptDuration: parseFloat(duration),
+                timestamp: new Date(),
+            });
 
-        res.json({ success: true });
+            const io = req.app.get('io');
+            io.emit('newMessage');
+
+            res.json({
+                success: true,
+                encryptDuration: parseFloat(duration),
+            });
+        } catch (err) {
+            console.error("💥 Failed to save message:", err.message);
+            res.status(500).json({
+                success: false,
+                message: 'Failed to send message',
+                error: err.message,
+            });
+        }
     });
 
+
     router.post('/chat/decrypt', requireAuth, async (req, res) => {
-        const { message, type } = req.body;
+        const { message } = req.body;
+        const start = performance.now();
 
         if (!message) {
             return res.status(400).json({ success: false, message: 'Missing encrypted message' });
         }
 
         try {
-            let decrypted;
-            let mime = null;
+            const decrypted = decrypt3DES(message);
+            const duration = performance.now() - start;
 
-            if (type === 'image') {
-                const buffer = Buffer.from(message, 'base64');
-                const decryptedBuffer = decryptImage(buffer);
-
-                if (!Buffer.isBuffer(decryptedBuffer)) {
-                    throw new Error("Decryption result is not a buffer");
-                }
-
-                const fileType = await fileTypeFromBuffer(decryptedBuffer);
-                mime = fileType?.mime || 'image/jpeg';
-
-                decrypted = decryptedBuffer.toString('base64');
-            } else {
-                decrypted = decrypt3DES(message);
-            }
-
-            res.json({ success: true, decrypted, mime });
+            res.json({
+                success: true,
+                decrypted,
+                duration: parseFloat(duration),
+            });
         } catch (err) {
             console.error('🔐 Decrypt error:', err.message);
             res.status(500).json({ success: false, message: 'Failed to decrypt', error: err.message });
         }
     });
-
-
-
 
 
     router.post('/upload-image', requireAuth, async (req, res) => {
@@ -146,38 +155,42 @@ export default function (db) {
     });
 
 
-    router.get('/chat/all', requireAuth, async (_req, res) => {
+    router.get('/chat/all', requireAuth, async (req, res) => {
         try {
-            const textMessages = await db.collection('messages').find({}).toArray();
+            const userEmail = req.user?.email;
+            if (!userEmail) {
+                return res.status(401).json({ success: false, message: 'Unauthorized: Email tidak ditemukan' });
+            }
+
+            const textMessages = await db.collection('messages')
+                .find({})
+                .sort({ timestamp: 1 })
+                .toArray();
 
             const mappedText = textMessages.map((msg) => ({
                 sender: msg.sender,
                 message: msg.message,
                 timestamp: msg.timestamp,
+                encryptDuration: msg.encryptDuration,
                 type: 'text',
             }));
 
-            mappedText.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-
             res.json(mappedText);
         } catch (err) {
-            console.error('❌ Failed to fetch chat messages:', err);
-            res.status(500).json({ success: false, message: 'Failed to load messages' });
+            console.error('❌ Gagal mengambil semua pesan:', err);
+            res.status(500).json({ success: false, message: 'Gagal memuat pesan' });
         }
     });
 
-
-
-
-    router.get('/chat/image', async (_req, res) => {
-        try {
-            const allImages = await image.find({}).sort({ timestamp: 1 }).toArray()
-            res.json(allImages)
-        } catch (err) {
-            console.error(err)
-            res.status(500).json({ message: 'Gagal memuat gambar' })
-        }
-    })
+    // router.get('/chat/image', async (_req, res) => {
+    //     try {
+    //         const allImages = await image.find({}).sort({ timestamp: 1 }).toArray()
+    //         res.json(allImages)
+    //     } catch (err) {
+    //         console.error(err)
+    //         res.status(500).json({ message: 'Gagal memuat gambar' })
+    //     }
+    // })
 
 
     return router;
